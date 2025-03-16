@@ -80,18 +80,18 @@ class TextureBlender:
                     raise
             raise e
 
-    def _to_tensor(self, data):
-        """Convert various data types to PyTorch tensor."""
+    def _to_tensor(self, data, dtype=torch.float64):
+        """Convert various data types to PyTorch tensor with specified dtype."""
         if isinstance(data, torch.Tensor):
-            return data
+            return data.to(dtype=dtype)
         elif hasattr(data, 'numpy'):  # For TrackedArray or similar
-            return torch.from_numpy(data.numpy())
+            return torch.from_numpy(data.numpy()).to(dtype=dtype)
         elif isinstance(data, np.ndarray):
-            return torch.from_numpy(data)
+            return torch.from_numpy(data).to(dtype=dtype)
         else:
             try:
                 # Try converting to numpy first
-                return torch.from_numpy(np.array(data))
+                return torch.from_numpy(np.array(data)).to(dtype=dtype)
             except:
                 raise TypeError(f"Cannot convert {type(data)} to tensor")
 
@@ -108,11 +108,13 @@ class TextureBlender:
         
         texture_map = torch.zeros(
             (self.config.texture_size, self.config.texture_size, 3),
-            device=self.device
+            device=self.device,
+            dtype=torch.float64
         )
         weight_map = torch.zeros(
             (self.config.texture_size, self.config.texture_size),
-            device=self.device
+            device=self.device,
+            dtype=torch.float64
         )
         
         for i in range(0, len(vertices), chunk_size):
@@ -192,7 +194,7 @@ class TextureBlender:
         )
         
         # Visibility based on normal orientation
-        visibility = (view_dot > 0).float()
+        visibility = (view_dot > 0).to(dtype=torch.float64)
         
         # Smooth falloff for grazing angles
         weights = torch.pow(torch.clamp(view_dot, 0, 1), 2)
@@ -209,9 +211,12 @@ class TextureBlender:
         coords = proj_verts[:, :2] / proj_verts[:, 2:3]
         coords = coords * 2 - 1
         
+        # Convert image to double for consistency
+        image_double = image.to(dtype=torch.float64, device=self.device)
+        
         # Sample using grid_sample
         colors = F.grid_sample(
-            image.to(self.device).unsqueeze(0),
+            image_double.unsqueeze(0),
             coords.unsqueeze(0).unsqueeze(1),
             align_corners=True
         )
@@ -232,6 +237,10 @@ class TextureBlender:
         
         # Scale UV coordinates to texture resolution
         uv_pixels = (uv_coords_tensor * (self.config.texture_size - 1)).long()
+        
+        # Convert colors and weights to double
+        colors = colors.to(dtype=torch.float64)
+        weights = weights.to(dtype=torch.float64)
         
         # Accumulate colors and weights
         for i in range(len(colors)):
