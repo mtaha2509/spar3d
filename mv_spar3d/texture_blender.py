@@ -80,6 +80,21 @@ class TextureBlender:
                     raise
             raise e
 
+    def _to_tensor(self, data):
+        """Convert various data types to PyTorch tensor."""
+        if isinstance(data, torch.Tensor):
+            return data
+        elif hasattr(data, 'numpy'):  # For TrackedArray or similar
+            return torch.from_numpy(data.numpy())
+        elif isinstance(data, np.ndarray):
+            return torch.from_numpy(data)
+        else:
+            try:
+                # Try converting to numpy first
+                return torch.from_numpy(np.array(data))
+            except:
+                raise TypeError(f"Cannot convert {type(data)} to tensor")
+
     def _generate_view_texture(
         self,
         mesh: Mesh,
@@ -137,17 +152,22 @@ class TextureBlender:
         camera_params: Dict[str, torch.Tensor]
     ) -> torch.Tensor:
         """Project vertices to view space."""
+        # Convert vertices and camera parameters to tensors if needed
+        vertices_tensor = self._to_tensor(vertices).to(self.device)
+        extrinsic = self._to_tensor(camera_params['extrinsic']).to(self.device)
+        intrinsic = self._to_tensor(camera_params['intrinsic']).to(self.device)
+        
         # Transform to camera space
         cam_verts = torch.einsum(
             'ij,bj->bi',
-            camera_params['extrinsic'][:3, :3].to(self.device),
-            vertices.to(self.device)
-        ) + camera_params['extrinsic'][:3, 3].to(self.device)
+            extrinsic[:3, :3],
+            vertices_tensor
+        ) + extrinsic[:3, 3]
         
         # Project to image space
         proj_verts = torch.einsum(
             'ij,bj->bi',
-            camera_params['intrinsic'].to(self.device),
+            intrinsic,
             cam_verts
         )
         
@@ -160,11 +180,15 @@ class TextureBlender:
         normals: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute visibility and blending weights."""
+        # Convert inputs to tensors if needed
+        normals_tensor = self._to_tensor(normals).to(self.device)
+        view_direction_tensor = self._to_tensor(view_direction).to(self.device)
+        
         # Compute view-dependent weights
         view_dot = torch.einsum(
             'bi,i->b',
-            normals.to(self.device),
-            view_direction.to(self.device)
+            normals_tensor,
+            view_direction_tensor
         )
         
         # Visibility based on normal orientation
@@ -203,8 +227,11 @@ class TextureBlender:
         uv_coords: torch.Tensor
     ):
         """Accumulate colors and weights to texture map."""
+        # Convert UV coordinates to tensor if needed
+        uv_coords_tensor = self._to_tensor(uv_coords).to(self.device)
+        
         # Scale UV coordinates to texture resolution
-        uv_pixels = (uv_coords.to(self.device) * (self.config.texture_size - 1)).long()
+        uv_pixels = (uv_coords_tensor * (self.config.texture_size - 1)).long()
         
         # Accumulate colors and weights
         for i in range(len(colors)):
