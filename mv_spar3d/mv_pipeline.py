@@ -70,6 +70,7 @@ class MultiViewPipeline:
             # Process views sequentially
             processed_views = []
             images = []
+            pil_images = []  # Store original PIL images
             
             for view_type, image_source in views.items():
                 # Load and preprocess image
@@ -86,6 +87,7 @@ class MultiViewPipeline:
                 )
                 processed_views.append(view_data)
                 images.append(self._prepare_image_tensor(image))
+                pil_images.append(image)  # Store the PIL image
                 
                 # Save intermediate results if requested
                 if output_dir:
@@ -112,8 +114,10 @@ class MultiViewPipeline:
             
             # Ensure points are in the correct format for the model
             model_points = fused_points.to(device=self.config.device, dtype=torch.float32)
+            
+            # Use the original PIL image for mesh generation
             base_mesh = self.view_processor.model.run_image(
-                images[0],
+                pil_images[0],  # Use the stored PIL image
                 pointcloud=model_points,
                 bake_resolution=self.config.texture_resolution
             )[0]
@@ -123,7 +127,7 @@ class MultiViewPipeline:
             final_mesh = self.texture_blender.blend_textures(
                 base_mesh,
                 processed_views,
-                images
+                pil_images  # Use PIL images for texture blending
             )
             
             # Save final result if requested
@@ -161,13 +165,23 @@ class MultiViewPipeline:
         return image
 
     def _prepare_image_tensor(self, image: Image.Image) -> torch.Tensor:
-        """Convert PIL image to tensor."""
+        """Convert PIL image to tensor while maintaining RGBA format."""
+        # Ensure image is in RGBA format
+        if image.mode != 'RGBA':
+            image = image.convert('RGBA')
+        
         # Convert to numpy array and normalize
         img_array = np.array(image)
-        img_tensor = torch.from_numpy(img_array).float() / 255.0
         
-        # Convert to CxHxW format
-        img_tensor = img_tensor.permute(2, 0, 1)
+        # Ensure array is float32 and normalized to [0, 1]
+        img_array = img_array.astype(np.float32) / 255.0
+        
+        # Convert to CxHxW format (4xHxW for RGBA)
+        img_tensor = torch.from_numpy(img_array).permute(2, 0, 1)
+        
+        # Move to device if needed
+        if self.config.device != 'cpu':
+            img_tensor = img_tensor.to(self.config.device)
         
         return img_tensor
 
