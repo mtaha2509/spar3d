@@ -244,7 +244,7 @@ class TextureBlender:
         visibility = (view_dot > 0).to(dtype=torch.float64)
         
         # Smooth falloff for grazing angles
-        weights = torch.pow(torch.clamp(view_dot, 0, 1), 2)
+        weights = torch.pow(torch.clamp(view_dot, 0, 1), 2).to(dtype=torch.float64)
         
         return visibility, weights
 
@@ -279,7 +279,10 @@ class TextureBlender:
             align_corners=True
         )
         
-        return colors.squeeze()
+        # Reshape colors to (N, 3) format
+        colors = colors.squeeze(0).permute(1, 2, 0).reshape(-1, 3)
+        
+        return colors
 
     def _accumulate_texture(
         self,
@@ -300,12 +303,22 @@ class TextureBlender:
         colors = colors.to(dtype=torch.float64)
         weights = weights.to(dtype=torch.float64)
         
+        # Ensure colors are in the right shape (N, 3)
+        if colors.dim() == 3:  # If colors are in (3, N) format
+            colors = colors.permute(1, 0)
+        elif colors.dim() == 1:  # If colors are flattened
+            colors = colors.view(-1, 3)
+            
+        # Ensure weights are the right shape
+        weights = weights.view(-1)
+        
         # Accumulate colors and weights
         for i in range(len(colors)):
             if weights[i] > 0:
                 u, v = uv_pixels[i]
                 if 0 <= u < self.config.texture_size and 0 <= v < self.config.texture_size:
-                    texture_map[v, u] += colors[i] * weights[i]
+                    weighted_color = colors[i] * weights[i]
+                    texture_map[v, u] += weighted_color
                     weight_map[v, u] += weights[i]
 
     def _blend_texture_maps(

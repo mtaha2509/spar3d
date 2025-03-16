@@ -72,39 +72,57 @@ class MultiViewPipeline:
             images = []
             pil_images = []  # Store original PIL images
             
-            for view_type, image_source in views.items():
-                # Load and preprocess image
-                if isinstance(image_source, str):
-                    image = self._load_and_preprocess_image(image_source)
-                else:
-                    image = self._preprocess_image(image_source)
-                
-                # Process view
-                print(f"Processing {view_type} view...")
-                view_data = self.view_processor.process_view(
-                    image,
-                    view_type
-                )
-                processed_views.append(view_data)
-                images.append(self._prepare_image_tensor(image))
-                pil_images.append(image)  # Store the PIL image
-                
-                # Save intermediate results if requested
-                if output_dir:
-                    self._save_intermediate(view_data, view_type, output_dir)
-                
-                # Clear GPU memory after each view
-                torch.cuda.empty_cache()
+            # Check if we can load existing point clouds
+            if output_dir and self._check_existing_point_clouds(views.keys(), output_dir):
+                print("Found existing point clouds, loading them...")
+                processed_views = self._load_existing_point_clouds(views.keys(), output_dir)
+                # Still need to load images for texturing
+                for view_type, image_source in views.items():
+                    if isinstance(image_source, str):
+                        image = self._load_and_preprocess_image(image_source)
+                    else:
+                        image = self._preprocess_image(image_source)
+                    pil_images.append(image)
+            else:
+                for view_type, image_source in views.items():
+                    # Load and preprocess image
+                    if isinstance(image_source, str):
+                        image = self._load_and_preprocess_image(image_source)
+                    else:
+                        image = self._preprocess_image(image_source)
+                    
+                    # Process view
+                    print(f"Processing {view_type} view...")
+                    view_data = self.view_processor.process_view(
+                        image,
+                        view_type
+                    )
+                    processed_views.append(view_data)
+                    images.append(self._prepare_image_tensor(image))
+                    pil_images.append(image)  # Store the PIL image
+                    
+                    # Save intermediate results if requested
+                    if output_dir:
+                        self._save_intermediate(view_data, view_type, output_dir)
+                    
+                    # Clear GPU memory after each view
+                    torch.cuda.empty_cache()
             
-            # Fuse point clouds
-            print("Fusing point clouds...")
-            fused_points = self.point_fuser.fuse_views(processed_views)
+            # Check if fused point cloud exists
+            fused_points_path = os.path.join(output_dir, "fused_points.ply") if output_dir else None
+            if fused_points_path and os.path.exists(fused_points_path):
+                print("Found existing fused point cloud, loading it...")
+                fused_points = self._load_point_cloud(fused_points_path)
+            else:
+                # Fuse point clouds
+                print("Fusing point clouds...")
+                fused_points = self.point_fuser.fuse_views(processed_views)
             
             # Ensure fused points are in the correct format
             if not isinstance(fused_points, torch.Tensor):
                 fused_points = torch.tensor(fused_points, dtype=torch.float32, device=self.config.device)
             
-            if output_dir:
+            if output_dir and not os.path.exists(os.path.join(output_dir, "fused_points.ply")):
                 points_path = os.path.join(output_dir, "fused_points.ply")
                 self._save_point_cloud(fused_points, points_path)
             
@@ -117,7 +135,6 @@ class MultiViewPipeline:
             
             # SPAR3D expects points in (N, 6) format with XYZ and RGB
             if model_points.shape[-1] > 3:
-                # If we have normals, use only XYZ
                 model_points = model_points[:, :3]
             
             # Add default colors (white) to the points
@@ -156,6 +173,70 @@ class MultiViewPipeline:
             # Clean up
             self.cleanup()
             raise e
+
+    def _check_existing_point_clouds(self, view_types: List[str], output_dir: str) -> bool:
+        """Check if point clouds exist for all views."""
+        for view_type in view_types:
+            point_cloud_path = os.path.join(output_dir, f"{view_type}_points.ply")
+            if not os.path.exists(point_cloud_path):
+                return False
+        return True
+
+    def _load_existing_point_clouds(self, view_types: List[str], output_dir: str) -> List[ViewData]:
+        """Load existing point clouds and create ViewData objects."""
+        import open3d as o3d
+        processed_views = []
+        
+        for view_type in view_types:
+            point_cloud_path = os.path.join(output_dir, f"{view_type}_points.ply")
+            confidence_path = os.path.join(output_dir, f"{view_type}_confidence.png")
+            
+            # Load point cloud
+            pcd = o3d.io.read_point_cloud(point_cloud_path)
+            points = torch.tensor(np.asarray(pcd.points), dtype=torch.float32)
+            
+            # Load confidence map if it exists
+            if os.path.exists(confidence_path):
+                confidence = torch.tensor(
+                    np.array(Image.open(confidence_path)) / 255.0,
+                    dtype=torch.float32
+                )
+            else:
+                confidence = torch.ones_like(points[:, 0])
+            
+            # Create view direction
+            view_directions = {
+                'front': torch.tensor([0, 0, -1]),
+                'back': torch.tensor([0, 0, 1]),
+                'left': torch.tensor([-1, 0, 0]),
+                'right': torch.tensor([1, 0, 0])
+            }
+            
+            # Create ViewData object
+            view_data = ViewData(
+                point_cloud=points,
+                camera_params={
+                    'extrinsic': torch.eye(4),
+                    'intrinsic': torch.eye(3),
+                    'fov': torch.tensor(0.8)
+                },
+                confidence_map=confidence,
+                view_direction=view_directions[view_type]
+            )
+            
+            processed_views.append(view_data)
+        
+        return processed_views
+
+    def _load_point_cloud(self, path: str) -> torch.Tensor:
+        """Load point cloud from PLY file."""
+        import open3d as o3d
+        pcd = o3d.io.read_point_cloud(path)
+        points = np.asarray(pcd.points)
+        if hasattr(pcd, 'colors'):
+            colors = np.asarray(pcd.colors)
+            return torch.tensor(np.concatenate([points, colors], axis=1), dtype=torch.float32)
+        return torch.tensor(points, dtype=torch.float32)
 
     def _load_and_preprocess_image(self, image_path: str) -> Image.Image:
         """Load and preprocess image from path."""
