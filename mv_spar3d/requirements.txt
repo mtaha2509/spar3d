@@ -1,0 +1,10 @@
+open3d>=0.16.0
+numpy>=1.21.0
+torch>=2.0.0
+pillow>=9.0.0
+einops>=0.6.0
+trimesh>=3.9.0
+safetensors>=0.3.0
+omegaconf>=2.3.0
+huggingface_hub>=0.16.0
+jaxtyping>=0.2.0 
