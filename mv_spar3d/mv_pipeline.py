@@ -3,6 +3,7 @@ Main pipeline for multi-view 3D reconstruction using SPAR3D.
 """
 
 import torch
+import numpy as np
 from typing import List, Dict, Optional, Union
 from dataclasses import dataclass
 from PIL import Image
@@ -20,9 +21,9 @@ class PipelineConfig:
     texture_resolution: int = 1024
     low_vram_mode: bool = True
     device: str = "cuda"
-    batch_size: int = 1
     voxel_size: float = 0.02
     max_points_per_view: int = 100000
+    max_image_size: int = 1024  # Maximum size for the longer edge of input images
 
 
 class MultiViewPipeline:
@@ -70,21 +71,20 @@ class MultiViewPipeline:
             images = []
             
             for view_type, image_source in views.items():
-                # Load image if path provided
+                # Load and preprocess image
                 if isinstance(image_source, str):
-                    image = Image.open(image_source).convert('RGBA')
+                    image = self._load_and_preprocess_image(image_source)
                 else:
-                    image = image_source
+                    image = self._preprocess_image(image_source)
                 
                 # Process view
                 print(f"Processing {view_type} view...")
                 view_data = self.view_processor.process_view(
                     image,
-                    view_type,
-                    self.config.batch_size
+                    view_type
                 )
                 processed_views.append(view_data)
-                images.append(self._prepare_image(image))
+                images.append(self._prepare_image_tensor(image))
                 
                 # Save intermediate results if requested
                 if output_dir:
@@ -129,11 +129,38 @@ class MultiViewPipeline:
             self.cleanup()
             raise e
 
-    def _prepare_image(self, image: Image.Image) -> torch.Tensor:
+    def _load_and_preprocess_image(self, image_path: str) -> Image.Image:
+        """Load and preprocess image from path."""
+        try:
+            image = Image.open(image_path).convert('RGBA')
+            return self._preprocess_image(image)
+        except Exception as e:
+            raise RuntimeError(f"Error loading image {image_path}: {str(e)}")
+
+    def _preprocess_image(self, image: Image.Image) -> Image.Image:
+        """Preprocess image for reconstruction."""
+        # Resize if needed
+        if max(image.size) > self.config.max_image_size:
+            ratio = self.config.max_image_size / max(image.size)
+            new_size = tuple(int(dim * ratio) for dim in image.size)
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # Ensure image is in RGBA format
+        if image.mode != 'RGBA':
+            image = image.convert('RGBA')
+        
+        return image
+
+    def _prepare_image_tensor(self, image: Image.Image) -> torch.Tensor:
         """Convert PIL image to tensor."""
-        # Convert to tensor and normalize
-        tensor = torch.tensor(np.array(image), dtype=torch.float32) / 255.0
-        return tensor.permute(2, 0, 1)  # Convert to CxHxW format
+        # Convert to numpy array and normalize
+        img_array = np.array(image)
+        img_tensor = torch.from_numpy(img_array).float() / 255.0
+        
+        # Convert to CxHxW format
+        img_tensor = img_tensor.permute(2, 0, 1)
+        
+        return img_tensor
 
     def _save_intermediate(
         self,

@@ -47,7 +47,7 @@ class ViewProcessor:
         self,
         image: Image.Image,
         view_type: str,
-        batch_size: int = 1
+        batch_size: int = 1  # Kept for API compatibility but not used
     ) -> ViewData:
         """
         Process a single view efficiently.
@@ -55,7 +55,7 @@ class ViewProcessor:
         Args:
             image: Input image
             view_type: One of 'front', 'back', 'left', 'right'
-            batch_size: Batch size for processing
+            batch_size: Kept for API compatibility but not used
             
         Returns:
             ViewData containing point cloud and associated data
@@ -69,13 +69,20 @@ class ViewProcessor:
         }
 
         try:
-            with torch.no_grad(), torch.cuda.amp.autocast():
-                # Get point cloud and camera parameters
-                point_cloud, glob_dict = self.model.run_image(
-                    image,
-                    return_points=True,
-                    batch_size=batch_size
-                )
+            with torch.no_grad():
+                if self.device == "cuda":
+                    with torch.amp.autocast('cuda'):
+                        # Get point cloud and camera parameters
+                        point_cloud, glob_dict = self.model.run_image(
+                            image,
+                            return_points=True
+                        )
+                else:
+                    # Get point cloud and camera parameters
+                    point_cloud, glob_dict = self.model.run_image(
+                        image,
+                        return_points=True
+                    )
                 
                 # Extract confidence from model's internal features
                 confidence_map = self._compute_confidence_map(glob_dict)
@@ -97,11 +104,7 @@ class ViewProcessor:
         except RuntimeError as e:
             if "out of memory" in str(e):
                 torch.cuda.empty_cache()
-                if batch_size > 1:
-                    # Retry with smaller batch size
-                    return self.process_view(image, view_type, batch_size // 2)
-                else:
-                    raise RuntimeError("GPU out of memory even with batch size 1")
+                raise RuntimeError("GPU out of memory. Try reducing the image size or using low_vram_mode=True")
             raise e
 
     def _compute_confidence_map(self, glob_dict: Dict) -> torch.Tensor:
