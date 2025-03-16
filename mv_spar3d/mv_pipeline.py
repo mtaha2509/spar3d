@@ -196,14 +196,14 @@ class MultiViewPipeline:
         # Ensure points are on CPU and in float64 format (Open3D preference)
         points_np = points.detach().cpu().numpy().astype(np.float64)
         
-        # Ensure points are in the correct shape (Nx3)
-        if points_np.shape[-1] != 3:
-            if points_np.shape[0] == 3:
-                points_np = points_np.T
-            else:
-                raise ValueError(f"Points must have 3 coordinates, got shape {points_np.shape}")
+        # If points have more than 3 dimensions (e.g., including normals),
+        # extract just the XYZ coordinates
+        if points_np.shape[-1] > 3:
+            points_np = points_np[:, :3]  # Take first 3 dimensions (XYZ)
+        elif points_np.shape[-1] < 3:
+            raise ValueError(f"Points must have at least 3 coordinates, got shape {points_np.shape}")
         
-        # Reshape if needed
+        # Ensure points are in the correct shape (Nx3)
         if len(points_np.shape) > 2:
             points_np = points_np.reshape(-1, 3)
         
@@ -211,6 +211,11 @@ class MultiViewPipeline:
         pcd = o3d.geometry.PointCloud()
         try:
             pcd.points = o3d.utility.Vector3dVector(points_np)
+            
+            # If we have normals in the original data, try to set them
+            if points.shape[-1] == 6:
+                normals_np = points.detach().cpu().numpy()[:, 3:].astype(np.float64)
+                pcd.normals = o3d.utility.Vector3dVector(normals_np)
         except Exception as e:
             print(f"Debug info - points shape: {points_np.shape}, dtype: {points_np.dtype}")
             print(f"First few points: {points_np[:5]}")
