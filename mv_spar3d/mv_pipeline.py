@@ -233,10 +233,16 @@ class MultiViewPipeline:
         import open3d as o3d
         pcd = o3d.io.read_point_cloud(path)
         points = np.asarray(pcd.points)
-        if hasattr(pcd, 'colors'):
+        
+        # Check if we have valid color data
+        if hasattr(pcd, 'colors') and len(pcd.colors) == len(points):
             colors = np.asarray(pcd.colors)
-            return torch.tensor(np.concatenate([points, colors], axis=1), dtype=torch.float32)
-        return torch.tensor(points, dtype=torch.float32)
+            if len(colors) > 0:
+                return torch.tensor(np.concatenate([points, colors], axis=1), dtype=torch.float32)
+        
+        # If no valid colors, create default white colors
+        default_colors = np.ones((len(points), 3), dtype=points.dtype)
+        return torch.tensor(np.concatenate([points, default_colors], axis=1), dtype=torch.float32)
 
     def _load_and_preprocess_image(self, image_path: str) -> Image.Image:
         """Load and preprocess image from path."""
