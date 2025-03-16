@@ -193,18 +193,39 @@ class MultiViewPipeline:
         """Save point cloud to PLY file."""
         import open3d as o3d
         
-        # Ensure points are on CPU and in float32 format
-        points_np = points.detach().cpu().numpy().astype(np.float32)
+        # Ensure points are on CPU and in float64 format (Open3D preference)
+        points_np = points.detach().cpu().numpy().astype(np.float64)
+        
+        # Ensure points are in the correct shape (Nx3)
+        if points_np.shape[-1] != 3:
+            if points_np.shape[0] == 3:
+                points_np = points_np.T
+            else:
+                raise ValueError(f"Points must have 3 coordinates, got shape {points_np.shape}")
+        
+        # Reshape if needed
+        if len(points_np.shape) > 2:
+            points_np = points_np.reshape(-1, 3)
         
         # Create point cloud and set points
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points_np)
+        try:
+            pcd.points = o3d.utility.Vector3dVector(points_np)
+        except Exception as e:
+            print(f"Debug info - points shape: {points_np.shape}, dtype: {points_np.dtype}")
+            print(f"First few points: {points_np[:5]}")
+            raise RuntimeError(f"Failed to create point cloud: {str(e)}")
         
         # Ensure output directory exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
         
-        # Save point cloud
-        o3d.io.write_point_cloud(path, pcd, write_ascii=True)  # Use ASCII format for better compatibility
+        try:
+            # Save point cloud
+            success = o3d.io.write_point_cloud(path, pcd, write_ascii=True)
+            if not success:
+                raise RuntimeError("Failed to write point cloud file")
+        except Exception as e:
+            raise RuntimeError(f"Error saving point cloud to {path}: {str(e)}")
 
     def _save_mesh(self, mesh: Mesh, output_dir: str):
         """Save mesh to file."""
