@@ -15,9 +15,9 @@ def main():
         texture_resolution=1024,
         low_vram_mode=True,
         device="cuda" if torch.cuda.is_available() else "cpu",
-        batch_size=1,
         voxel_size=0.02,
-        max_points_per_view=100000
+        max_points_per_view=100000,
+        max_image_size=1024  # Maximum size for the longer edge of input images
     )
     
     # Initialize pipeline
@@ -38,6 +38,10 @@ def main():
     try:
         # Process views
         print("Starting multi-view reconstruction...")
+        print("Using device:", config.device)
+        print("Low VRAM mode:", config.low_vram_mode)
+        print("Max image size:", config.max_image_size)
+        
         mesh = pipeline.process_views(views, output_dir=output_dir)
         
         print(f"\nReconstruction completed successfully!")
@@ -49,6 +53,8 @@ def main():
         
     except Exception as e:
         print(f"Error during reconstruction: {str(e)}")
+        import traceback
+        traceback.print_exc()
     finally:
         # Clean up
         pipeline.cleanup()
