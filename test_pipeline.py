@@ -25,11 +25,12 @@ def main():
     
     # Define views using Linux-style paths
     views = {
-        'front': os.path.join('/home', 'taha', 'Downloads', 'doll', 'front.png'),
-        'back': os.path.join('/home', 'taha', 'Downloads', 'doll', 'back.png'),
-        'left': os.path.join('/home', 'taha', 'Downloads', 'doll', 'left.png'),
-        'right': os.path.join('/home', 'taha', 'Downloads', 'doll', 'right.png')
+        'front': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'front.png'),
+        'back': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'back.png'),
+        'left': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'left.png'),
+        'right': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'right.png')
     }
+
     
     # Create output directory
     output_dir = os.path.join(os.getcwd(), "output")
