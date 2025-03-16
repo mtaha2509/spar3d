@@ -23,16 +23,16 @@ def main():
     # Initialize pipeline
     pipeline = MultiViewPipeline(config)
     
-    # Define views
+    # Define views using Linux-style paths
     views = {
-        'front': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'front.png'),
-        'back': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'back.png'),
-        'left': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'left.png'),
-        'right': os.path.join('C:', 'Users', 'DELL', 'Downloads', 'doll', 'right.png')
+        'front': os.path.join('/home', 'taha', 'Downloads', 'doll', 'front.png'),
+        'back': os.path.join('/home', 'taha', 'Downloads', 'doll', 'back.png'),
+        'left': os.path.join('/home', 'taha', 'Downloads', 'doll', 'left.png'),
+        'right': os.path.join('/home', 'taha', 'Downloads', 'doll', 'right.png')
     }
     
     # Create output directory
-    output_dir = "output"
+    output_dir = os.path.join(os.getcwd(), "output")
     os.makedirs(output_dir, exist_ok=True)
     
     try:
@@ -41,6 +41,10 @@ def main():
         print("Using device:", config.device)
         print("Low VRAM mode:", config.low_vram_mode)
         print("Max image size:", config.max_image_size)
+        print("Input images:")
+        for view_type, path in views.items():
+            print(f"- {view_type}: {path}")
+        print(f"Output directory: {output_dir}")
         
         mesh = pipeline.process_views(views, output_dir=output_dir)
         
