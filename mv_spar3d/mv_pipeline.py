@@ -98,15 +98,23 @@ class MultiViewPipeline:
             print("Fusing point clouds...")
             fused_points = self.point_fuser.fuse_views(processed_views)
             
+            # Ensure fused points are in the correct format
+            if not isinstance(fused_points, torch.Tensor):
+                fused_points = torch.tensor(fused_points, dtype=torch.float32, device=self.config.device)
+            
             if output_dir:
-                self._save_point_cloud(fused_points, output_dir)
+                points_path = os.path.join(output_dir, "fused_points.ply")
+                self._save_point_cloud(fused_points, points_path)
             
             # Generate base mesh using front view
             print("Generating base mesh...")
             front_view = processed_views[0]  # Assuming front is first
+            
+            # Ensure points are in the correct format for the model
+            model_points = fused_points.to(device=self.config.device, dtype=torch.float32)
             base_mesh = self.view_processor.model.run_image(
                 images[0],
-                pointcloud=fused_points,
+                pointcloud=model_points,
                 bake_resolution=self.config.texture_resolution
             )[0]
             
@@ -185,9 +193,18 @@ class MultiViewPipeline:
         """Save point cloud to PLY file."""
         import open3d as o3d
         
+        # Ensure points are on CPU and in float32 format
+        points_np = points.detach().cpu().numpy().astype(np.float32)
+        
+        # Create point cloud and set points
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points.cpu().numpy())
-        o3d.io.write_point_cloud(path, pcd)
+        pcd.points = o3d.utility.Vector3dVector(points_np)
+        
+        # Ensure output directory exists
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        # Save point cloud
+        o3d.io.write_point_cloud(path, pcd, write_ascii=True)  # Use ASCII format for better compatibility
 
     def _save_mesh(self, mesh: Mesh, output_dir: str):
         """Save mesh to file."""
