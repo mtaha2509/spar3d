@@ -5,7 +5,7 @@ Memory-efficient view processor for SPAR3D multi-view pipeline.
 import torch
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, Any
 from PIL import Image
 
 from spar3d.system import SPAR3D
@@ -44,6 +44,21 @@ class ViewProcessor:
         
         self.model.to(self.device)
         self.model.eval()
+
+    def _to_tensor(self, data: Any) -> torch.Tensor:
+        """Convert various data types to PyTorch tensor."""
+        if isinstance(data, torch.Tensor):
+            return data
+        elif hasattr(data, 'numpy'):  # For TrackedArray or similar
+            return torch.from_numpy(data.numpy()).to(self.device)
+        elif isinstance(data, np.ndarray):
+            return torch.from_numpy(data).to(self.device)
+        else:
+            try:
+                # Try converting to numpy first
+                return torch.from_numpy(np.array(data)).to(self.device)
+            except:
+                raise TypeError(f"Cannot convert {type(data)} to tensor")
 
     def process_view(
         self,
@@ -94,16 +109,19 @@ class ViewProcessor:
                 else:
                     # If it's a custom PointCloud object, try different attribute names
                     try:
-                        points = glob_dict['point_clouds'][0].xyz
+                        points = self._to_tensor(glob_dict['point_clouds'][0].xyz)
                     except AttributeError:
                         try:
-                            points = glob_dict['point_clouds'][0].vertices
+                            points = self._to_tensor(glob_dict['point_clouds'][0].vertices)
                         except AttributeError:
                             try:
-                                # Try getting the underlying tensor
-                                points = glob_dict['point_clouds'][0].tensor
+                                points = self._to_tensor(glob_dict['point_clouds'][0].tensor)
                             except AttributeError:
-                                raise RuntimeError("Unable to extract point cloud data from model output")
+                                try:
+                                    # Try direct conversion if it's array-like
+                                    points = self._to_tensor(glob_dict['point_clouds'][0])
+                                except:
+                                    raise RuntimeError("Unable to extract point cloud data from model output")
                 
                 # Extract confidence from model's internal features
                 confidence_map = self._compute_confidence_map(glob_dict, points)
@@ -133,6 +151,7 @@ class ViewProcessor:
         # Use feature activations to estimate confidence
         features = glob_dict.get('features', None)
         if features is not None:
+            features = self._to_tensor(features)
             confidence = torch.norm(features, dim=1)
             return torch.sigmoid(confidence)
         return torch.ones(points.shape[0], device=self.device)
@@ -140,9 +159,9 @@ class ViewProcessor:
     def _extract_camera_params(self, glob_dict: Dict) -> Dict[str, torch.Tensor]:
         """Extract and store relevant camera parameters."""
         return {
-            'extrinsic': glob_dict.get('camera_extrinsic', torch.eye(4, device=self.device)),
-            'intrinsic': glob_dict.get('camera_intrinsic', torch.eye(3, device=self.device)),
-            'fov': glob_dict.get('fov', torch.tensor(0.8, device=self.device))
+            'extrinsic': self._to_tensor(glob_dict.get('camera_extrinsic', torch.eye(4, device=self.device))),
+            'intrinsic': self._to_tensor(glob_dict.get('camera_intrinsic', torch.eye(3, device=self.device))),
+            'fov': self._to_tensor(glob_dict.get('fov', torch.tensor(0.8, device=self.device)))
         }
 
     def cleanup(self):
