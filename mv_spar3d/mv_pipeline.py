@@ -34,7 +34,8 @@ class MultiViewPipeline:
         # Initialize components
         self.view_processor = ViewProcessor(
             device=self.config.device,
-            low_vram_mode=self.config.low_vram_mode
+            low_vram_mode=self.config.low_vram_mode,
+            bake_resolution=self.config.texture_resolution
         )
         
         self.point_fuser = PointCloudFuser(

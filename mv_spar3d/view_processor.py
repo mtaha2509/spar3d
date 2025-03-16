@@ -26,10 +26,12 @@ class ViewProcessor:
         self,
         model: Optional[SPAR3D] = None,
         device: str = "cuda",
-        low_vram_mode: bool = True
+        low_vram_mode: bool = True,
+        bake_resolution: int = 1024
     ):
         """Initialize view processor with optional model instance."""
         self.device = device
+        self.bake_resolution = bake_resolution
         if model is None:
             self.model = SPAR3D.from_pretrained(
                 "stabilityai/stable-point-aware-3d",
@@ -75,12 +77,14 @@ class ViewProcessor:
                         # Get point cloud and camera parameters
                         point_cloud, glob_dict = self.model.run_image(
                             image,
+                            bake_resolution=self.bake_resolution,
                             return_points=True
                         )
                 else:
                     # Get point cloud and camera parameters
                     point_cloud, glob_dict = self.model.run_image(
                         image,
+                        bake_resolution=self.bake_resolution,
                         return_points=True
                     )
                 
