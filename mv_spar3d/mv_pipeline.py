@@ -115,22 +115,25 @@ class MultiViewPipeline:
             # Ensure points are in the correct format for the model
             model_points = fused_points.to(device=self.config.device, dtype=torch.float32)
             
-            # SPAR3D expects points in (N, 3) format without normals
+            # SPAR3D expects points in (N, 6) format with XYZ and RGB
             if model_points.shape[-1] > 3:
+                # If we have normals, use only XYZ
                 model_points = model_points[:, :3]
             
-            # Create point cloud dictionary as expected by SPAR3D
-            point_cloud_dict = {
-                'points': model_points,
-                'normals': None,  # Let SPAR3D compute normals
-                'colors': None,   # No colors needed
-                'faces': None     # No faces yet
-            }
+            # Add default colors (white) to the points
+            num_points = model_points.shape[0]
+            colors = torch.ones((num_points, 3), dtype=torch.float32, device=self.config.device)
+            
+            # Combine points and colors into (N, 6) format
+            model_points_with_color = torch.cat([model_points, colors], dim=1)
+            
+            # Convert to numpy for SPAR3D
+            point_cloud_np = model_points_with_color.detach().cpu().numpy()
             
             # Use the original PIL image for mesh generation
             base_mesh = self.view_processor.model.run_image(
                 pil_images[0],  # Use the stored PIL image
-                pointcloud=point_cloud_dict,  # Pass as dictionary
+                pointcloud=point_cloud_np,  # Pass numpy array directly
                 bake_resolution=self.config.texture_resolution
             )[0]
             
