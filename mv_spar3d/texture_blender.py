@@ -39,7 +39,7 @@ class TextureBlender:
         Args:
             mesh: Base mesh to texture
             views: List of view data
-            images: List of view images as tensors
+            images: List of view images (can be PIL Images or tensors)
             
         Returns:
             Mesh with blended textures
@@ -51,8 +51,21 @@ class TextureBlender:
             
             # Process each view
             for view, image in zip(views, images):
+                # Convert image to tensor if needed
+                if not isinstance(image, torch.Tensor):
+                    # Convert PIL Image to tensor
+                    img_array = np.array(image)
+                    if img_array.ndim == 2:  # Grayscale
+                        img_array = np.stack([img_array] * 3, axis=-1)
+                    elif img_array.shape[-1] == 4:  # RGBA
+                        img_array = img_array[..., :3]  # Keep only RGB
+                    # Normalize and convert to tensor
+                    img_tensor = torch.from_numpy(img_array.astype(np.float32)).permute(2, 0, 1) / 255.0
+                else:
+                    img_tensor = image
+                
                 texture_map, weight_map = self._generate_view_texture(
-                    mesh, view, image
+                    mesh, view, img_tensor
                 )
                 texture_maps.append(texture_map)
                 weight_maps.append(weight_map)
@@ -85,13 +98,13 @@ class TextureBlender:
         if isinstance(data, torch.Tensor):
             return data.to(dtype=dtype)
         elif hasattr(data, 'numpy'):  # For TrackedArray or similar
-            return torch.from_numpy(data.numpy()).to(dtype=dtype)
+            return torch.from_numpy(np.array(data.numpy(), copy=True)).to(dtype=dtype)
         elif isinstance(data, np.ndarray):
-            return torch.from_numpy(data).to(dtype=dtype)
+            return torch.from_numpy(np.array(data, copy=True)).to(dtype=dtype)
         else:
             try:
                 # Try converting to numpy first
-                return torch.from_numpy(np.array(data)).to(dtype=dtype)
+                return torch.from_numpy(np.array(data, copy=True)).to(dtype=dtype)
             except:
                 raise TypeError(f"Cannot convert {type(data)} to tensor")
 
@@ -211,8 +224,19 @@ class TextureBlender:
         coords = proj_verts[:, :2] / proj_verts[:, 2:3]
         coords = coords * 2 - 1
         
-        # Convert image to double for consistency
-        image_double = image.to(dtype=torch.float64, device=self.device)
+        # Ensure image is in the right format (CxHxW)
+        if image.dim() == 3 and image.shape[0] in [1, 3, 4]:
+            image_tensor = image
+        else:
+            # Assume HxWxC format, convert to CxHxW
+            image_tensor = image.permute(2, 0, 1)
+        
+        # If image has 4 channels (RGBA), keep only RGB
+        if image_tensor.shape[0] == 4:
+            image_tensor = image_tensor[:3]
+        
+        # Convert to double for consistency
+        image_double = image_tensor.to(dtype=torch.float64, device=self.device)
         
         # Sample using grid_sample
         colors = F.grid_sample(
