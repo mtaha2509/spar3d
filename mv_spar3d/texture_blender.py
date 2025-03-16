@@ -45,6 +45,11 @@ class TextureBlender:
             Mesh with blended textures
         """
         try:
+            # Generate UV coordinates if they don't exist
+            if not hasattr(mesh, 'uv_coords'):
+                print("Generating UV coordinates for mesh...")
+                mesh.uv_coords = self._generate_uv_coords(mesh)
+            
             # Initialize texture maps
             texture_maps = []
             weight_maps = []
@@ -75,6 +80,7 @@ class TextureBlender:
             
             # Apply to mesh
             mesh.texture = final_texture
+            mesh.has_texture = True  # Mark mesh as textured
             
             return mesh
 
@@ -108,6 +114,26 @@ class TextureBlender:
             except:
                 raise TypeError(f"Cannot convert {type(data)} to tensor")
 
+    def _generate_uv_coords(self, mesh: Mesh) -> torch.Tensor:
+        """Generate UV coordinates for mesh using spherical projection."""
+        vertices = self._to_tensor(mesh.vertices).to(self.device)
+        
+        # Center the mesh
+        center = vertices.mean(dim=0, keepdim=True)
+        centered_verts = vertices - center
+        
+        # Compute spherical coordinates
+        x, y, z = centered_verts.unbind(-1)
+        r = torch.sqrt(x*x + y*y + z*z)
+        theta = torch.arccos(z / (r + 1e-8))  # Add epsilon to avoid division by zero
+        phi = torch.arctan2(y, x)
+        
+        # Convert to UV coordinates
+        u = (phi + torch.pi) / (2 * torch.pi)
+        v = theta / torch.pi
+        
+        return torch.stack([u, v], dim=-1)
+
     def _generate_view_texture(
         self,
         mesh: Mesh,
@@ -130,6 +156,10 @@ class TextureBlender:
             dtype=torch.float64
         )
         
+        # Ensure UV coordinates exist
+        if not hasattr(mesh, 'uv_coords'):
+            mesh.uv_coords = self._generate_uv_coords(mesh)
+        
         for i in range(0, len(vertices), chunk_size):
             chunk_verts = vertices[i:i + chunk_size]
             
@@ -140,7 +170,7 @@ class TextureBlender:
             visibility, weights = self._compute_visibility_weights(
                 proj_verts,
                 view.view_direction,
-                mesh.vertex_normals[i:i + chunk_size]
+                mesh.vertex_normals[i:i + chunk_size] if hasattr(mesh, 'vertex_normals') else None
             )
             
             # Sample image colors
@@ -192,19 +222,23 @@ class TextureBlender:
         self,
         proj_verts: torch.Tensor,
         view_direction: torch.Tensor,
-        normals: torch.Tensor
+        normals: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute visibility and blending weights."""
         # Convert inputs to tensors if needed
-        normals_tensor = self._to_tensor(normals).to(self.device)
         view_direction_tensor = self._to_tensor(view_direction).to(self.device)
         
-        # Compute view-dependent weights
-        view_dot = torch.einsum(
-            'bi,i->b',
-            normals_tensor,
-            view_direction_tensor
-        )
+        if normals is not None:
+            normals_tensor = self._to_tensor(normals).to(self.device)
+            # Compute view-dependent weights
+            view_dot = torch.einsum(
+                'bi,i->b',
+                normals_tensor,
+                view_direction_tensor
+            )
+        else:
+            # If no normals available, use simpler weighting
+            view_dot = torch.ones(proj_verts.shape[0], device=self.device)
         
         # Visibility based on normal orientation
         visibility = (view_dot > 0).to(dtype=torch.float64)
