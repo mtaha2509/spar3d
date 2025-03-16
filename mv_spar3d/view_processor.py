@@ -88,12 +88,29 @@ class ViewProcessor:
                         return_points=True
                     )
                 
+                # Extract point cloud data
+                if isinstance(glob_dict['point_clouds'][0], torch.Tensor):
+                    points = glob_dict['point_clouds'][0]
+                else:
+                    # If it's a custom PointCloud object, try different attribute names
+                    try:
+                        points = glob_dict['point_clouds'][0].xyz
+                    except AttributeError:
+                        try:
+                            points = glob_dict['point_clouds'][0].vertices
+                        except AttributeError:
+                            try:
+                                # Try getting the underlying tensor
+                                points = glob_dict['point_clouds'][0].tensor
+                            except AttributeError:
+                                raise RuntimeError("Unable to extract point cloud data from model output")
+                
                 # Extract confidence from model's internal features
-                confidence_map = self._compute_confidence_map(glob_dict)
+                confidence_map = self._compute_confidence_map(glob_dict, points)
                 
                 # Create view data
                 view_data = ViewData(
-                    point_cloud=glob_dict['point_clouds'][0].points.to('cpu'),
+                    point_cloud=points.to('cpu'),
                     camera_params=self._extract_camera_params(glob_dict),
                     confidence_map=confidence_map.to('cpu'),
                     view_direction=view_directions[view_type].to('cpu')
@@ -111,14 +128,14 @@ class ViewProcessor:
                 raise RuntimeError("GPU out of memory. Try reducing the image size or using low_vram_mode=True")
             raise e
 
-    def _compute_confidence_map(self, glob_dict: Dict) -> torch.Tensor:
+    def _compute_confidence_map(self, glob_dict: Dict, points: torch.Tensor) -> torch.Tensor:
         """Compute confidence map for point cloud quality."""
         # Use feature activations to estimate confidence
         features = glob_dict.get('features', None)
         if features is not None:
             confidence = torch.norm(features, dim=1)
             return torch.sigmoid(confidence)
-        return torch.ones(glob_dict['point_clouds'][0].points.shape[0], device=self.device)
+        return torch.ones(points.shape[0], device=self.device)
 
     def _extract_camera_params(self, glob_dict: Dict) -> Dict[str, torch.Tensor]:
         """Extract and store relevant camera parameters."""
